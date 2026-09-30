@@ -1,104 +1,89 @@
-# AI Assistant — API
+# 🚀 Nexa AI
 
-FastAPI backend. Local Ollama models are used first; cloud providers
-(Anthropic, OpenAI, Gemini, Grok, Meta Llama) are the fallback.
+Nexa AI is a high-performance, fullstack AI assistant featuring real-time voice interaction and advanced vision capabilities.
 
-## Run
+## ✨ Features
+- 🎙️ **Voice Mode:** Real-time, low-latency voice conversation powered by LiveKit.
+- 📸 **Vision Mode:** Upload and analyze photos using local (Ollama) or cloud (Anthropic/OpenAI) models.
+- 🤖 **Smart Fallback:** Automatically switches to the best available model if the chosen one fails.
+- 🛠️ **Fullstack Architecture:** FastAPI backend, Next.js frontend, and a dedicated Python Voice Agent.
 
+---
+
+## 🚀 Quick Start (The Easiest Way)
+
+The fastest way to get Nexa AI running is using **Docker**.
+
+### 1. Setup Environment
+Create `.env` files in the `api/` and `agent/` folders with your keys:
+- `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`
+
+### 2. Launch
+Run the following command in the root directory:
 ```bash
+docker compose up --build
+```
+
+### 3. Access
+Open your browser to: **`http://localhost:3000`**
+
+---
+
+## 🛠️ Manual Installation (Without Docker)
+
+If you prefer running the components manually:
+
+### 1. Backend (API)
+```bash
+cd api
 uv sync
-cp .env.example .env          # add any cloud API keys you have
-uv run fastapi dev app/main.py   # http://localhost:8000/docs
+uv run fastapi dev app/main.py
 ```
+*Runs at `http://localhost:8000`*
 
-## Quality
-
+### 2. Voice Agent
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest
+cd agent
+uv sync
+uv run python voice_agent.py start
 ```
 
-## Endpoints
-
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/health` | Liveness check |
-| GET | `/api/models?refresh=true` | Installed Ollama models + cloud models, grouped by provider, with the default pick, the default pick for photos (`default_vision`) and the photo limits. Each model has `vision: true/false` |
-| POST | `/api/chat` | Streams a reply as server-sent events |
-
-`POST /api/chat` body:
-
-```json
-{ "messages": [{"role": "user", "content": "Hi"}], "provider": "ollama", "model": "llama3.2:latest" }
+### 3. Frontend (Web)
+```bash
+cd web
+npm install
+npm run dev
 ```
+*Access at `http://localhost:3000`*
 
-A user message can carry photos (JPEG, PNG, WebP or GIF, base64 or a `data:` URL; the
-real format is read from the file itself):
+---
 
-```json
-{ "role": "user", "content": "What's on this receipt?", "images": [{"media_type": "image/jpeg", "data": "/9j/4AAQ..."}] }
-```
+## 🎙️ Voice Mode Configuration
+To enable the voice button, ensure your `api/.env` and `agent/.env` contain the same LiveKit credentials:
+- `LIVEKIT_URL`: Your LiveKit Cloud URL (e.g., `wss://your-project.livekit.cloud`)
+- `LIVEKIT_API_KEY`: Your API key from LiveKit dashboard.
+- `LIVEKIT_API_SECRET`: Your API secret from LiveKit dashboard.
+- `VOICE_AGENT_NAME`: `nexa-agent`
 
-`provider` and `model` are optional; without them the API picks the first
-local model, then the first configured cloud provider.
+---
 
-Stream events:
+## 📸 Photo Capabilities
+Nexa AI supports vision-capable models.
+- **Local:** Run `ollama pull gemma3` or `llava`.
+- **Cloud:** Use Claude 3.5 Sonnet or GPT-4o.
+- **Limits:** Max 5 images per message, 10MB per image.
 
-```
-event: meta
-data: {"provider":"ollama","model":"llama3.2:latest","local":true,"fallback":false,"notice":null}
+---
 
-data: {"delta":"Hello"}
+## 📐 Architecture
+- **Web:** Next.js 16, React 19, Tailwind CSS, Lucide Icons.
+- **API:** FastAPI, Pydantic, Uvicorn, LiveKit SDK.
+- **Agent:** Python, LiveKit Agents SDK.
+- **Models:** Ollama (Local), Anthropic/OpenAI (Cloud).
 
-event: done        (or)   event: error
-data: {}                  data: {"message":"..."}
-```
-
-## How fallback works
-
-1. The model picked in the UI is tried first.
-2. If it fails **before** sending any text, the API tries the first installed
-   Ollama model, then each cloud provider in `CLOUD_PRIORITY` order.
-3. The `meta` event says which model actually answered (`fallback: true`, with
-   the reason in `notice`) so the UI can tell the user.
-4. If a model fails mid-answer, the API reports an error rather than switching,
-   so replies never mix two models.
-
-Set `ALLOW_CLOUD_FALLBACK=false` to keep everything on the chosen model.
-
-## Photos
-
-- Limits: `MAX_IMAGES_PER_MESSAGE` (5), `MAX_IMAGES_PER_REQUEST` (20, the whole
-  history) and `MAX_IMAGE_BYTES` (10 MB). Breaking one returns 422 with a readable `detail`.
-  `/api/models` returns them as `image_limits` so the web app follows your settings.
-- Request bodies over the photo budget are refused with 413 while they stream in,
-  and at most 100 photos per request are ever decoded.
-- Ollama says which models can see images (`ollama show` capabilities). Cloud models
-  are matched by name (`app/vision.py`); `VISION_MODELS` adds patterns.
-- When any message has photos, Auto and fallback use only models that can see. A
-  chosen text-only model gets an `error` event instead of a reply that ignores the photo.
-- Photos go to Ollama as raw bytes (never strings: the Ollama SDK reads a string
-  that looks like a path from disk), to Anthropic as image blocks (5 MB each at
-  most; larger ones fall back to another model) and to OpenAI-compatible APIs as
-  `image_url` parts. Nothing is written to disk.
-- Try it locally: `ollama pull gemma3` (or `llava`, `qwen2.5vl`).
-
-## Layout
-
-```
-app/
-  main.py              app factory, CORS, lifespan
-  core/config.py       settings from env / .env
-  schemas.py           request/response models
-  deps.py              FastAPI dependencies
-  routes/              health, models, chat
-  providers/
-    base.py            Provider interface
-    ollama.py          local models (ollama SDK)
-    anthropic.py       Claude (anthropic SDK)
-    openai_compat.py   OpenAI, Gemini, Grok, Meta (OpenAI-compatible APIs)
-    registry.py        builds providers, lists models, picks candidates
-  services/chat.py     streaming + fallback logic
-tests/                 pytest suite with fake providers (no network needed)
+## 🧪 Quality Assurance
+```bash
+# Run API & Voice tests
+cd api && uv run pytest
 ```
